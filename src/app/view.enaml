@@ -1,0 +1,341 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2017, Jairus Martin.
+
+Distributed under the terms of the MIT License.
+
+The full license is in the file COPYING.txt, distributed with this software.
+
+Created on May 20, 2017
+
+@author: jrm
+'''
+from enamlnative.widgets.api import *
+from enaml.core.api import Conditional, Looper
+from models import AppState, Bible, Bookmark, AndroidApplication
+
+enamldef HBox(LinearLayout):
+  orientation = "horizontal"
+
+enamldef VBox(LinearLayout):
+  orientation = "vertical"
+
+enamldef Card(CardView):
+  padding = (20, 20, 20, 20)
+  margins = (10, 10, 0, 10)
+  content_padding = (10,10,10,10)
+
+enamldef CardTitle(TextView):
+  font_family = "sans-serif-condensed-light"
+  text_size = 18
+
+enamldef MenuItem(Button):
+  #font_family = "sans-serif-serif-medium"
+  text_size = 16
+  style = 'borderless'
+  padding = (10,10,10,10)
+  text_alignment = 'left'
+
+enamldef ScreenPager(ViewPager):
+  paging_enabled = False
+  layout_width = 'match_parent'
+  layout_height = 'match_parent'
+
+enamldef Screen(PagerFragment):
+  pass
+
+enamldef Divider(View):
+  background_color = '#CCCCCC'
+  layout_height = '1'
+
+enamldef RightDrawer(VBox):  view:
+  attr app
+  attr bible << app.bible
+  attr reader
+  layout_gravity = 'right'
+  layout_width = '200'
+  layout_height = 'match_parent'
+  ScrollView:
+    layout_height = 'match_parent'
+    VBox:
+      background_color = '#FFFFFF'
+      layout_height = 'match_parent'
+      CardTitle:
+        text = "Bookmarks"
+        padding = (10,10,10,10)
+      Conditional:
+        condition << not app.bookmarks
+        TextView:
+          text = "No bookmarks added"
+          padding = (10,10,10,10)
+      Looper:
+        iterable << app.bookmarks
+        MenuItem:
+          attr bookmark << loop_item
+          text << u'{}'.format(bookmark.name)
+          clicked ::
+            bible.current_book = bookmark.book
+            bible.current_chapter = bookmark.chapter #: Doesnt work
+            #reader.current_index = bookmark.chapter.number-1
+            view.parent.opened = [] #: Close the drawer
+      MenuItem:
+        visible << bool(app.bookmarks)
+        text = "Clear bookmarks"
+        clicked:: app.bookmarks = []
+      Divider:
+        pass
+      CardTitle:
+        text = "Settings"
+        padding = (10,10,10,10)
+      TextView:
+        text = "Font size"
+        padding = (10,10,10,10)
+      Spinner: sizes:
+        padding = (10,0,10,10)
+        items = [12, 14, 16, 18, 24]
+        selected << sizes.items.index(app.text_size)
+        selected :: app.text_size = sizes.items[change['value']]
+      TextView:
+        text = "Book order"
+        padding = (10,10,10,10)
+      Spinner: book_order:
+        padding = (10,0,10,10)
+        items = [it.title() for it in app.get_member('book_order').items]
+        selected << book_order.items.index(app.book_order.title())
+        selected :: app.book_order = book_order.items[change['value']].lower()
+      TextView:
+        text = "Keep screen on"
+        padding = (10,10,10,10)
+      Switch: wake_lock:
+        text = "Enabled"
+        padding = (20,10,10,10)
+        text_size = 16
+        checked := app.wake_lock
+      Divider:
+        pass
+      CardTitle:
+        text = "Bible Version"
+        padding = (10,10,10,10)
+      TextView:
+        text << u"{}".format(app.bible.version.name if app.bible else u"")
+        padding = (10,10,10,10)
+      MenuItem:
+        text = "Change"
+        clicked :: app.screen = "versions"
+
+def by_name(book):
+  return book.name
+
+enamldef LeftDrawer(ScrollView): view:
+  attr app
+  attr bible << app.bible
+  layout_gravity = 'left'
+  layout_width = '200'
+  layout_height = 'match_parent'
+  attr books << (bible.books
+                 if app.book_order=='normal'
+                 else sorted(bible.books,key=by_name)) if bible else []
+  VBox:
+    background_color = '#FFFFFF'
+    CardTitle:
+      text = "Books"
+      padding = (10,10,10,10)
+    Looper:
+      iterable << view.books
+      MenuItem: li:
+        attr book << view.books[loop_index] if view.books else None
+        text << book.name if book else ""
+        clicked ::
+          bible.current_book = li.book
+          view.parent.opened = []
+
+enamldef ChapterView(ScrollView):
+  attr app
+  attr chapter
+  VBox:
+    Card:
+      margins = (10,10,10,10)
+      VBox:
+        CardTitle:
+          text << u"Chapter - {}".format(chapter.number)
+        TextView:
+          #font_family = 'serif'
+          text_size << app.text_size
+          text_selectable = True
+          line_spacing = (0,2)
+          text << u"   ".join([u"{}. {}".format(v.number, v.text) for v in chapter.verses])
+
+enamldef ReaderView(ViewPager): view:
+  attr app
+  attr bible << app.bible
+  attr theme << app.theme
+  #attr current_chapter << bible.current_chapter if bible else None
+  layout_width = 'match_parent'
+  layout_height = 'match_parent'
+  background_color << theme.background_color
+  current_index << bible.current_chapter.number - 1 if bible else 0
+  current_index ::
+      if bible is not None:
+        bible.current_chapter = bible.current_book.chapters[change['value']]
+  # current_chapter ::
+  #   #: This is a hack to work around the view pager not changing correctly
+  #   print("Current chapter changed!")
+  #   if view.current_chapter is not None:
+  #     i = view.current_chapter.number -1
+  #     if i != view.current_index:
+  #       #: redic hack haha
+  #
+  #       AndroidApplication.instance().timed_call(100,setattr, view,'current_index',i)
+
+  TabLayout:
+    visible << False if bible is None else not bible.loading
+    layout_gravity = 'bottom'
+    tab_mode = 'scrollable'
+    tab_color_selected << theme.toolbar_text
+    tab_color << '#88'+theme.toolbar_text[1:]
+    background_color << theme.toolbar_color
+  Conditional:
+    condition << bible is None or bible.loading
+    Fragment:
+      FrameLayout:
+        VBox:
+          ActivityIndicator:
+            margins = (0, 200, 0, 0)
+            layout_height = 'wrap_content'
+            layout_width = 'match_parent'
+  Looper:
+    #iterable << range(len(bible.current_book.chapters)) if bible else []
+    iterable << bible.current_book.chapters if bible else []
+    TabFragment: tab:
+      #attr chapter << bible.current_book.chapters[loop_index] if bible else None
+      attr chapter = loop_item
+      title << u"{}".format(chapter.number)
+      ChapterView:
+        app << view.app
+        chapter << tab.chapter
+
+enamldef VersionView(ScrollView): list_view:
+  attr app
+  attr items << [v for v in sorted(app.bible_versions.values(),key=lambda v:v.language)]
+  #background_color << app.theme.background_color
+  VBox:
+    Looper:
+      iterable = range(len(list_view.items))
+      Card: li:
+        margins = (10,5,10,5)
+        attr version = list_view.items[loop_index]
+        clickable = True
+        clicked ::
+          if not version.downloaded:
+            version.download()
+          else:
+            app.screen = 'reader'
+            app.bible = app.get_bible(version.key)#Bible(version=version)
+        VBox:
+          #padding = (20,10,20,10)i
+          HBox:
+            VBox:
+              CardTitle:
+                text << version.name
+              TextView:
+                text << version.status if version.status else version.language
+            Icon:
+              visible << version.downloaded
+              text_color << app.theme.indicator_color
+              text_size = 32
+              layout_height = 'match_parent'
+              layout_width = 'match_parent'
+              text_alignment = 'right'
+              text = u"{md-check}"
+
+          ProgressBar: pb:
+            visible << version.downloading
+            progress << version.progress
+
+
+enamldef ContentView(VBox): root:
+  attr app = AppState.instance() or AppState()
+  attr theme << app.theme
+  Toolbar: toolbar:
+    background_color << theme.toolbar_color
+    content_padding = (0,0,0,0)
+    Flexbox:
+      align_items = "center"
+      justify_content = "space_between"
+      layout_height = 'wrap_content'
+      layout_width = 'match_parent'
+      Flexbox:
+        align_items = "center"
+        layout_width = 'wrap_content'
+        Conditional:
+          condition << app.screen=='reader'
+          IconButton:
+            text = "{md-menu}"
+            text_color << theme.toolbar_text
+            style = "borderless"
+            text_size = 24
+            layout_width = '48'
+            clicked::
+              if drawer_layout.opened:
+                drawer_layout.opened = []
+              else:
+                drawer_layout.opened = [left_drawer]
+        Conditional:
+          condition << app.screen=='settings'
+          IconButton:
+            text = "{md-arrow-back}"
+            text_color << theme.toolbar_text
+            style = "borderless"
+            text_size = 24
+            #layout_width = '48'
+            clicked:: app.screen = 'reader'
+        TextView: toolbar_title:
+          padding = (10, 0, 0, 0)
+          text << screen_pager.children[screen_pager.current_index].title
+          text_color << theme.toolbar_text
+          text_size = 18
+      Conditional:
+        condition << app.screen=='reader'
+        IconButton:
+          text = "{md-bookmark-border}"
+          text_color << theme.toolbar_text
+          style = "borderless"
+          text_size = 24
+          layout_width = '48'
+          #layout_width = 'match_parent'
+          #text_alignment = 'right'
+          layout = dict(align_self="flex_end")
+          clicked::
+            bookmarks = app.bookmarks[:]
+            bookmark = Bookmark(bible=app.bible,
+                                book=app.bible.current_book,
+                                chapter=app.bible.current_chapter)
+            names = [b.name for b in bookmarks]
+            if bookmark.name not in names:
+              bookmarks.insert(0,bookmark)
+              if len(bookmarks)>10:
+                bookmarks.pop()
+              app.bookmarks = bookmarks
+
+  DrawerLayout: drawer_layout:
+    layout_height = 'match_parent'
+    layout_width = 'match_parent'
+    ScreenPager: screen_pager:
+      current_index << app.get_member('screen').items.index(app.screen)
+      current_index ::
+        #: When the screen changes
+        if app.screen=='versions':
+          app.bible = None
+        drawer_layout.opened = [] # Close the drawer
+      Screen:
+        title = "Choose a Bible version"
+        VersionView: version_view:
+          app << root.app
+      Screen:
+        title << app.bible.current_book.name if app.bible else ""
+        ReaderView: reader_view:
+         app << root.app
+    LeftDrawer: left_drawer:
+      app << root.app
+    RightDrawer: right_drawer:
+      app << root.app
